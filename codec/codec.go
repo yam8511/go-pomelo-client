@@ -2,7 +2,6 @@ package codec
 
 import (
 	"bytes"
-	"log"
 
 	"github.com/yam8511/go-pomelo-client/packet"
 )
@@ -93,13 +92,13 @@ func Encode(typ byte, data []byte) ([]byte, error) {
 	buf := make([]byte, dataLen+HeadLength)
 	buf[0] = byte(typ)
 
-	log.Println("Package 類型 ---> ", typ)
-	log.Println("Package 類型的 buffer ---> ", buf)
+	// log.Println("Package 類型 ---> ", typ)
+	// log.Println("Package 類型的 buffer ---> ", buf)
 	copy(buf[1:HeadLength], intToBytes(dataLen))
-	log.Println("Header長度 ---> ", dataLen)
-	log.Println("Header長度的 buffer ---> ", buf[1:HeadLength])
+	// log.Println("Header長度 ---> ", dataLen)
+	// log.Println("Header長度的 buffer ---> ", buf[1:HeadLength])
 	copy(buf[HeadLength:], data)
-	log.Println("本身資料的 buffer ---> ", buf[HeadLength:])
+	// log.Println("本身資料的 buffer ---> ", buf[HeadLength:])
 
 	return buf, nil
 }

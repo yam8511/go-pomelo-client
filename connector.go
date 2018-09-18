@@ -15,13 +15,14 @@ import (
 
 // Connector is a Pomelo client
 type Connector struct {
-	conn       net.Conn       // low-level connection
-	codec      *codec.Decoder // decoder
-	mid        uint           // message id
-	muConn     sync.RWMutex
-	connecting bool        // connection status
-	die        chan byte   // connector close channel
-	chSend     chan []byte // send queue
+	conn              net.Conn       // low-level connection
+	codec             *codec.Decoder // decoder
+	mid               uint           // message id
+	muConn            sync.RWMutex
+	connecting        bool        // connection status
+	die               chan byte   // connector close channel
+	chSend            chan []byte // send queue
+	connectedCallback func()
 
 	// some packet data
 	handshakeData    []byte // handshake data
@@ -56,7 +57,7 @@ func (c *Connector) SetHandshake(handshake interface{}) error {
 func (c *Connector) SetHandshakeAck(handshakeAck interface{}) error {
 	var err error
 	if handshakeAck == nil {
-		c.heartbeatData, err = codec.Encode(packet.HandshakeAck, nil)
+		c.handshakeAckData, err = codec.Encode(packet.HandshakeAck, nil)
 		if err != nil {
 			return err
 		}
@@ -99,6 +100,11 @@ func (c *Connector) SetHeartBeart(heartbeat interface{}) error {
 	return nil
 }
 
+// Connected 連線之後，會做的事情
+func (c *Connector) Connected(cb func()) {
+	c.connectedCallback = cb
+}
+
 // Run 啟動連線
 func (c *Connector) Run(addr string) error {
 	if c.handshakeData == nil {
@@ -106,11 +112,17 @@ func (c *Connector) Run(addr string) error {
 	}
 
 	if c.handshakeAckData == nil {
-		c.SetHandshake(nil)
+		err := c.SetHandshakeAck(nil)
+		if err != nil {
+			return err
+		}
 	}
 
 	if c.heartbeatData == nil {
-		c.SetHeartBeart(nil)
+		err := c.SetHeartBeart(nil)
+		if err != nil {
+			return err
+		}
 	}
 
 	conn, err := net.Dial("tcp", addr)
@@ -119,14 +131,15 @@ func (c *Connector) Run(addr string) error {
 	}
 
 	c.conn = conn
+	c.connecting = true
 
 	go c.write()
 
 	c.send(c.handshakeData)
 
-	c.read()
+	err = c.read()
 
-	return nil
+	return err
 }
 
 // Request send a request to server and register a callbck for the response
@@ -246,19 +259,19 @@ func (c *Connector) send(data []byte) {
 	c.chSend <- data
 }
 
-func (c *Connector) read() {
+func (c *Connector) read() error {
 	buf := make([]byte, 2048)
 
 	for {
 		time.Sleep(time.Second)
 		if c.IsClosed() {
-			return
+			return errors.New("連線已經關閉")
 		}
 		n, err := c.conn.Read(buf)
 		if err != nil {
 			// log.Println("讀取資料失敗", err.Error())
 			c.Close()
-			return
+			return err
 			// continue
 		}
 
@@ -279,6 +292,7 @@ func (c *Connector) read() {
 }
 
 func (c *Connector) processPacket(p *packet.Packet) {
+	// log.Printf("packet: %+v\n", p)
 	switch p.Type {
 	case packet.Handshake:
 		var handShakeResponse struct {
@@ -306,6 +320,9 @@ func (c *Connector) processPacket(p *packet.Packet) {
 				}
 			}()
 			c.send(c.handshakeAckData)
+			if c.connectedCallback != nil {
+				c.connectedCallback()
+			}
 		} else {
 			// log.Fatal("握手回傳不是200狀態", string(p.Data))
 			c.Close()
@@ -313,7 +330,6 @@ func (c *Connector) processPacket(p *packet.Packet) {
 	case packet.Data:
 		msg, err := message.Decode(p.Data)
 		if err != nil {
-			log.Println(err.Error())
 			return
 		}
 		c.processMessage(msg)
